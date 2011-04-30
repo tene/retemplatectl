@@ -1,0 +1,109 @@
+Retemplatectl is a set of infrastructure for managing configuration generation, deployment, upgrades, etc.  The intended audience is for sysadmins (like me) who have services (Apache, nginx, mysql, DNS, nagios) with config files that are generated.  There's a set of common functionality and infrastructure that's fairly desirable to have around this for all these situations, including:
+
+* Generate and deploy a new version of the config file and reload the service.
+* Roll things back to a previous version of the config when things fall over.
+* Produce a diff between the current file and the version that would replace it.
+* Produce notifications when the current config differs from what the authoritative source says it should be.
+
+The most-basic functionality is very simple to configure.  If you have an existing command that produces your config file on stdout, you need nothing more than to add a file with these contents to $configdir/target.d/
+
+    [nginx]
+    exe /usr/local/bin/my-generate-nginx => /etc/nginx/conf.d/my-nginx.conf
+
+The section header, [nginx], is used for grouping together configs into logical units (usually by service).  You can then produce the initial config:
+
+    $ rtc generate nginx
+
+Get the status of all configs for all groups:
+
+    $ rtc status all
+
+Get a diff of a config that should change:
+
+    $ rtc diff /etc/nginx/conf.d/my-nginx.conf
+    ... or ...
+    $ rtc diff nagios
+
+List the history of previously-generated versions of configs:
+
+    $ rtc history nginx
+
+Revert to a previous version of a config:
+
+    $ rtc revert ???
+
+Retemplatectl also offers more infrastructure for abstraction in template generation, and infrastructure to reload and restart your services.  We'll start with the second.
+
+Configuration for a specific service goes in the [SERVICENAME.conf] section in a file in target.d/ as follows:
+
+    [nginx.conf]
+    reload = /etc//init.d/nginx reload    # Run this when upgrading
+    histcount = 20                        # keep around at least 20 previous copies
+    histage   = 2 weeks                   # don't delete any revision we have used within the past 2 weeks
+
+The reload config option is aggregated; on upgrade of a service, all reload commands will be run.  The history control options are aggregated; the most conservative of all listed will be used.  (I expect this interface is the shittiest part; you should be able to specify for individual files, etc)
+
+With this config, upgrading to a new revision of the service is just:
+
+    $ rtc upgrade nginx
+
+If you have a common command that you run on your templates to generate the configs, you can add that as a template type by adding something like the following to plugins.d/
+
+    [templatetype.my-template]
+    type = stdout
+    command = /usr/local/bin/my-template --stdout $source
+    
+    ... or ...
+    
+    [templatetype.my-template]
+    type = inplace
+    command = /usr/local/bin/my-template $source $target
+
+You could then use this as follows:
+
+    [conf]
+    templatedir = /var/local/templates/
+    [nginx]
+    my-template nginx.my => /etc/nginx/conf.d/my-stuff.conf
+
+Alternatively, if you want to get a bit more abstract about data source and template language, aggregating multiple data sources and providing them to multiple template languages, you can do something like the following.
+
+First we configure two data sources, one for local host information and one for the list of backend servers for our proxy to use:
+
+    # sources.d/foo
+    # Configure a data source giving information about the local system
+    [asset]
+    type = stdout/json??? # dunno yet
+    command = /usr/local/bin/asset-info --json
+
+    # sources.d/web
+    # Provide the list of http servers to templates
+    [web]
+    type = stdout/yaml
+    command = /usr/local/bin/get-web-info
+
+Then we write a template using one of the provided template languages, Template Toolkit:
+
+    # my-nginx.tt
+    ...
+    worker_processes [% asset.worker_count %];
+    ...
+    upstream foo {
+    [% FOREACH node IN web %]
+      server [% node.ip %]:[% node.port %] weight=[% node.weight %]; # [% node.name %]
+    [% END %]
+    }
+
+Then we add a config for the template to rtc
+
+    # targets.d/nginx
+    [nginx]
+    tt my-nginx.tt => /etc/nginx/conf.d/my-stuff.conf
+
+If you want to use a template language that rtc doesn't ship a config file for, you can add one in plugins.d/ by using the vars config option:
+
+    # plugins.d/ponies
+    [templatetype.ponies]
+    vars = stdin/json           # receive the variables on stdin
+    type = stdout               # produce output on stdout
+    command = /usr/local/bin/fancy-ponies $source
