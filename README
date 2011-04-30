@@ -1,3 +1,5 @@
+This project is *probably* not useful, as it's *probably* better to just use a "real" configuration management system for it.  We currently don't use a reasonable system at work, and it's unlikely to change soon, so this is what I'd like to implement instead, to make things easier until we drop cfengine for something less horrible.
+
 Retemplatectl is a set of infrastructure for managing configuration generation, deployment, upgrades, etc.  The intended audience is for sysadmins (like me) who have services (Apache, nginx, mysql, DNS, nagios) with config files that are generated.  There's a set of common functionality and infrastructure that's fairly desirable to have around this for all these situations, including:
 
 * Generate and deploy a new version of the config file and reload the service.
